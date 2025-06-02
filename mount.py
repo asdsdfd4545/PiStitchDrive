@@ -44,38 +44,118 @@ def draw_text(text):
     display.image(image)
     display.show()
 
+def reset_pipe(pipe_path="/tmp/keypad_pipe"):
+    try:
+        if os.path.exists(pipe_path):
+            os.remove(pipe_path)
+            print(f"🗑️ ลบ pipe เก่าแล้ว: {pipe_path}")
+        os.mkfifo(pipe_path)
+        print(f"✅ สร้าง pipe ใหม่เรียบร้อย: {pipe_path}")
+    except Exception as e:
+        print(f"❌ เกิดข้อผิดพลาดขณะ reset pipe: {e}")
+
+
 # ใช้ raw mode เพื่อไม่ต้องกด Enter
 def realtime_input():
     text = ""
     pipe_path = "/tmp/keypad_pipe"
 
-    # สร้าง pipe ถ้ายังไม่มี
-    if not os.path.exists(pipe_path):
-        os.mkfifo(pipe_path)
+    reset_pipe(pipe_path)
 
     print("⌨️ กดข้อความผ่าน Keypad (Ent เพื่อส่ง, ← เพื่อลบทีละตัว, Esc เพื่อล้าง):")
 
+    first_input = True  # ✅ เพิ่ม flag ว่าเพิ่งเริ่มรับข้อความ
+
     with open(pipe_path, "r") as pipe:
         while True:
-            char = pipe.read(1)  # อ่านทีละตัว
+            char = pipe.read(1)
             if not char:
-                continue  # ถ้าอ่านไม่ได้ให้ข้าม
+                continue
+
+            # ✅ เคลียร์จอเมื่อเริ่มข้อความใหม่
+            if first_input:
+                clear_display()
+                first_input = False
 
             if char == "←":
                 text = text[:-1]
-            elif char == "E":  # ต้องอ่าน 'Ent' ต่ออีก 2 ตัว
+            elif char == "E":
                 if pipe.read(2) == "nt":
-                    draw_text("")  # ล้างจอ
+                    draw_text("")  # เคลียร์จอ
                     return text
-            elif char == "E":  # Esc
+            elif char == "E":
                 if pipe.read(2) == "sc":
                     text = ""
+                    first_input = True  # ✅ กลับสู่สถานะเริ่มใหม่
+                    clear_display()
             else:
                 text += char
 
             draw_text(text)
 
+
     print("\n👋 ออกจาก realtime input")
+
+def scroll_text_background(text, speed=0.02):
+    thread = threading.Thread(target=scroll_text, args=(text, speed))
+    thread.daemon = True  # ให้ปิดอัตโนมัติเมื่อโปรแกรมหลักจบ
+    thread.start()
+
+scrolling = False
+
+def scroll_text_controlled(text, speed=0.001):
+    global scrolling
+    scrolling = True
+
+    thaifont = ImageFont.truetype("/usr/share/fonts/truetype/tlwg/Kinnari.ttf", 24)
+
+    image = Image.new("1", (display.width, display.height))
+    draw = ImageDraw.Draw(image)
+    bbox = draw.textbbox((0, 0), text, font=thaifont)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
+    y = max((display.height - text_height) // 2 - bbox[1], 0)
+
+    if text_width <= display.width:
+        # ถ้าข้อความสั้น แสดงอยู่ตรงกลางนิ่งๆ
+        image = Image.new("1", (display.width, display.height))
+        draw = ImageDraw.Draw(image)
+        x = (display.width - text_width) // 2
+        draw.text((x, y), text, font=thaifont, fill=255)
+        display.image(image)
+        display.show()
+        return
+
+    # ข้อความยาว → scroll จาก x=0 ไป x=-(text_width - display.width)
+    start_x = 0
+    end_x = -(text_width - display.width)
+
+    while scrolling:
+        for offset in range(start_x, end_x - 1, -1):
+            if not scrolling:
+                break
+            image = Image.new("1", (display.width, display.height))
+            draw = ImageDraw.Draw(image)
+            draw.text((offset, y), text, font=thaifont, fill=255)
+            display.image(image)
+            display.show()
+            time.sleep(speed)
+
+
+
+def start_scroll(text):
+    thread = threading.Thread(target=scroll_text_controlled, args=(text,))
+    thread.daemon = True
+    thread.start()
+
+def stop_scroll():
+    global scrolling
+    scrolling = False
+def clear_display():
+    image = Image.new("1", (display.width, display.height))
+    display.image(image)
+    display.show()
+
 
 #--------------------------------------------------------------------------------
 
@@ -249,13 +329,24 @@ def main():
         print(f"  [{i}] {name}")
     time.sleep(5)
     start_blink("green")  # ไฟเขียวกระพริบ
+    stop_scroll()
+    clear_display()
+    start_scroll("ใส่เลขช่อง")
+    stop_scroll()
     idx = realtime_input()
     try:
         selected = folders[int(idx)]
+        stop_scroll()
+        clear_display()
+        draw_text(idx)
         start_blink("yellow")
     except (IndexError, ValueError):
         print("❌ เลือกหมายเลขไม่ถูกต้อง")
         start_blink("red")
+        stop_scroll()
+        clear_display()
+        start_scroll("ไม่มีช่อง "+str(idx))
+        time.sleep(2)
         return
 
     mount_image()
@@ -274,9 +365,17 @@ def main():
             "ro=0"
         ], check=True)
         start_blink("green")
+        stop_scroll()
+        clear_display()
+        start_scroll(str(idx)+" เสียบเครื่อง")
+        time.sleep(2)
         print("✅ g_mass_storage ถูกโหลดเรียบร้อย")
     except subprocess.CalledProcessError as e:
         start_blink("red")
+        stop_scroll()
+        clear_display()
+        start_scroll("ผิดพลาดกด → เพื่อเริ่มใหม่")
+        time.sleep(2)
         print("❌ เกิดข้อผิดพลาดในการโหลด g_mass_storage:", e)
 
 if __name__ == "__main__":

@@ -4,6 +4,14 @@ import subprocess
 import os
 import threading
 
+import sys
+import termios
+import tty
+import board
+import busio
+from PIL import Image, ImageDraw, ImageFont
+import adafruit_ssd1306
+
 KEYPAD = [
     ["F1", "F2", "#", "*"],
     ["1",  "2",  "3", "↑"],
@@ -95,18 +103,122 @@ def send_to_pipe(char):
     except Exception as e:
         print(f"❌ ไม่สามารถส่งข้อมูลไปที่ pipe: {e}")
 
+#OLED--------------------------------------------------------------------------------
+i2c = busio.I2C(board.SCL, board.SDA)
+display = adafruit_ssd1306.SSD1306_I2C(128, 32, i2c)
+
+# โหลดฟอนต์
+font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+font_size = 32  # ปรับขนาดตามที่เหมาะกับจอ
+font = ImageFont.truetype(font_path, font_size)
+
+# สร้างพื้นภาพ
+def draw_text(text):
+    image = Image.new("1", (display.width, display.height))
+    draw = ImageDraw.Draw(image)
+
+    bbox = draw.textbbox((0, 0), text, font=font)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
+
+    x = max((display.width - text_width) // 2, 0)
+    y = max((display.height - text_height) // 2 - bbox[1], 0)  # ✅ ปรับให้ไม่ตกขอบล่าง
+
+    draw.text((x, y), text, font=font, fill=255)
+    display.image(image)
+    display.show()
+
+def reset_pipe(pipe_path="/tmp/keypad_pipe"):
+    try:
+        if os.path.exists(pipe_path):
+            os.remove(pipe_path)
+            print(f"🗑️ ลบ pipe เก่าแล้ว: {pipe_path}")
+        os.mkfifo(pipe_path)
+        print(f"✅ สร้าง pipe ใหม่เรียบร้อย: {pipe_path}")
+    except Exception as e:
+        print(f"❌ เกิดข้อผิดพลาดขณะ reset pipe: {e}")
+
+def scroll_text_background(text, speed=0.0001):
+    thread = threading.Thread(target=scroll_text, args=(text, speed))
+    thread.daemon = True  # ให้ปิดอัตโนมัติเมื่อโปรแกรมหลักจบ
+    thread.start()
+
+scrolling = False
+
+def scroll_text_controlled(text, speed=0.0001):
+    global scrolling
+    scrolling = True
+
+    thaifont = ImageFont.truetype("/usr/share/fonts/truetype/tlwg/Kinnari.ttf", 24)
+
+    image = Image.new("1", (display.width, display.height))
+    draw = ImageDraw.Draw(image)
+    bbox = draw.textbbox((0, 0), text, font=thaifont)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
+    y = max((display.height - text_height) // 2 - bbox[1], 0)
+
+    if text_width <= display.width:
+        # ถ้าข้อความสั้น แสดงอยู่ตรงกลางนิ่งๆ
+        image = Image.new("1", (display.width, display.height))
+        draw = ImageDraw.Draw(image)
+        x = (display.width - text_width) // 2
+        draw.text((x, y), text, font=thaifont, fill=255)
+        display.image(image)
+        display.show()
+        return
+
+    # ข้อความยาว → scroll จาก x=0 ไป x=-(text_width - display.width)
+    start_x = 0
+    end_x = -(text_width - display.width)
+
+    while scrolling:
+        for offset in range(start_x, end_x - 1, -1):
+            if not scrolling:
+                break
+            image = Image.new("1", (display.width, display.height))
+            draw = ImageDraw.Draw(image)
+            draw.text((offset, y), text, font=thaifont, fill=255)
+            display.image(image)
+            display.show()
+            time.sleep(speed)
+
+
+
+def start_scroll(text):
+    thread = threading.Thread(target=scroll_text_controlled, args=(text,))
+    thread.daemon = True
+    thread.start()
+
+def stop_scroll():
+    global scrolling
+    scrolling = False
+def clear_display():
+    image = Image.new("1", (display.width, display.height))
+    display.image(image)
+    display.show()
+
+
+#--------------------------------------------------------------------------------
+
 try:
     last_key = None
     init_led()
     GPIO.output(RED, GPIO.LOW)
     GPIO.output(YELLOW, GPIO.LOW)
     GPIO.output(GREEN, GPIO.HIGH)
+    stop_scroll()
+    clear_display()
+    start_scroll("กด -> เพื่อเริ่มต้น หรือ กด * เพื่อปิดเครื่อง")
     while True:
         key = scan_keypad()
         if key and key != last_key:
             print("🔘 กด:", key)
 
             if key == "*":
+                stop_scroll()
+                clear_display()
+                start_scroll("ปิดเครื่อง")
                 GPIO.output(RED, GPIO.HIGH)
                 GPIO.output(YELLOW, GPIO.HIGH)
                 GPIO.output(GREEN, GPIO.HIGH)
@@ -114,6 +226,8 @@ try:
 
             elif key == "→":
                 # ตรวจสอบว่า testmou.py กำลังทำงานอยู่หรือไม่
+                stop_scroll()
+                clear_display()
                 GPIO.output(GREEN, GPIO.LOW)
                 GPIO.output(YELLOW, GPIO.HIGH)
                 result = subprocess.run(
