@@ -252,7 +252,6 @@ try:
             else:
                 send_to_pipe(key)  # ✅ ตรงนี้!
 
-
             last_key = key
         elif not key:
             last_key = None
