@@ -83,11 +83,6 @@ def realtime_input():
                 if pipe.read(2) == "nt":
                     draw_text("")  # เคลียร์จอ
                     return text
-            #elif char == "E":
-                #if pipe.read(2) == "sc":
-                    #text = ""
-                    #first_input = True  # ✅ กลับสู่สถานะเริ่มใหม่
-                    #clear_display()
             else:
                 text += char
 
@@ -372,7 +367,6 @@ def main():
 
     for i, name in enumerate(folders):
         print(f"  [{i}] {name}")
-    time.sleep(5)
     start_blink("green")  # ไฟเขียวกระพริบ
     stop_scroll()
     clear_display()
@@ -435,10 +429,10 @@ def main():
         while True:
             if realtime_input_check_special():
                 save_all_back_from_usb()
+                stop_scroll()
+                clear_display()
                 break
-        stop_scroll()
-        clear_display()
-        # reload systemd
+    # reload systemd
     subprocess.run(["sudo", "systemctl", "daemon-reload"])
 
     # restart your service
