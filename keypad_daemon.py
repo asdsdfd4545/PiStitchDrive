@@ -245,7 +245,7 @@ try:
 
                 print("🚀 เริ่มรัน testmou.py ใหม่")
                 subprocess.Popen(
-                    ["python3", "/home/tee/Desktop/dbindex/testmou.py"],
+                    ["python3", "/home/tee/Desktop/dbindex/mount.py"],
                     start_new_session=True
                 )
 

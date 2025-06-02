@@ -83,11 +83,11 @@ def realtime_input():
                 if pipe.read(2) == "nt":
                     draw_text("")  # เคลียร์จอ
                     return text
-            elif char == "E":
-                if pipe.read(2) == "sc":
-                    text = ""
-                    first_input = True  # ✅ กลับสู่สถานะเริ่มใหม่
-                    clear_display()
+            #elif char == "E":
+                #if pipe.read(2) == "sc":
+                    #text = ""
+                    #first_input = True  # ✅ กลับสู่สถานะเริ่มใหม่
+                    #clear_display()
             else:
                 text += char
 
@@ -95,6 +95,20 @@ def realtime_input():
 
 
     print("\n👋 ออกจาก realtime input")
+def realtime_input_check_special():
+    pipe_path = "/tmp/keypad_pipe"
+    reset_pipe(pipe_path)
+
+    with open(pipe_path, "r") as pipe:
+        while True:
+            char = pipe.read(1)
+            if not char:
+                continue
+
+            if char == "E":
+                next_chars = pipe.read(2)
+                if next_chars == "sc":
+                    return True
 
 def scroll_text_background(text, speed=0.02):
     thread = threading.Thread(target=scroll_text, args=(text, speed))
@@ -229,7 +243,7 @@ def find_usb_flash_mount():
 
 
 #PATTERN_ROOT = find_usb_flash_mount()
-PATTERN_ROOT = "/home/tee/Desktop/dbindex/realflash"
+PATTERN_ROOT = "/home/tee/Desktop/dbindex/rootfolder"
 print(f"✅ พบ USB Flash Drive ที่: {PATTERN_ROOT}")
 
 def list_pattern_folders():
@@ -315,6 +329,37 @@ def create_usb_image():
     time.sleep(1.0)
     print("✅ usb.img พร้อมใช้งาน\n")
 
+def save_all_back_from_usb():
+    try:
+        subprocess.run(["sudo", "modprobe", "-r", "g_mass_storage"], check=True)
+        time.sleep(0.5)
+
+        mount_image()
+        print("📥 ดึงข้อมูลทั้งหมดกลับมายัง PATTERN_ROOT...")
+
+        # ลบทุกไฟล์ใน PATTERN_ROOT
+        for f in os.listdir(PATTERN_ROOT):
+            f_path = os.path.join(PATTERN_ROOT, f)
+            if os.path.isfile(f_path) or os.path.islink(f_path):
+                os.remove(f_path)
+            elif os.path.isdir(f_path):
+                shutil.rmtree(f_path)
+
+        # คัดลอกจาก USB_MOUNT_PATH → PATTERN_ROOT
+        for item in os.listdir(USB_MOUNT_PATH):
+            s = os.path.join(USB_MOUNT_PATH, item)
+            d = os.path.join(PATTERN_ROOT, item)
+            if os.path.isdir(s):
+                shutil.copytree(s, d)
+            else:
+                shutil.copy2(s, d)
+
+        unmount_image()
+        print("✅ ดึงข้อมูลทั้งหมดกลับมายัง PATTERN_ROOT สำเร็จ")
+    except Exception as e:
+        print(f"❌ ล้มเหลวในการดึงข้อมูลทั้งหมด: {e}")
+
+
 
 def main():
     create_usb_image()
@@ -334,8 +379,13 @@ def main():
     start_scroll("ใส่เลขช่อง")
     stop_scroll()
     idx = realtime_input()
+    check_0 = False
     try:
-        selected = folders[int(idx)]
+        if idx != "0":
+            selected = folders[int(idx)-1]
+        else:
+            selected = PATTERN_ROOT
+            check_0 = True
         stop_scroll()
         clear_display()
         draw_text(idx)
@@ -368,7 +418,7 @@ def main():
         stop_scroll()
         clear_display()
         start_scroll(str(idx)+" เสียบเครื่อง")
-        time.sleep(2)
+        time.sleep(5)
         print("✅ g_mass_storage ถูกโหลดเรียบร้อย")
     except subprocess.CalledProcessError as e:
         start_blink("red")
@@ -377,6 +427,24 @@ def main():
         start_scroll("ผิดพลาดกด → เพื่อเริ่มใหม่")
         time.sleep(2)
         print("❌ เกิดข้อผิดพลาดในการโหลด g_mass_storage:", e)
+    if check_0:
+        start_blink("yellow")
+        stop_scroll()
+        clear_display()
+        start_scroll("เสร็จแล้วกด Esc")
+        while True:
+            if realtime_input_check_special():
+                save_all_back_from_usb()
+                break
+        stop_scroll()
+        clear_display()
+        # reload systemd
+    subprocess.run(["sudo", "systemctl", "daemon-reload"])
+
+    # restart your service
+    subprocess.run(["sudo", "systemctl", "restart", "keypad-daemon"])
+
+        
 
 if __name__ == "__main__":
     main()
