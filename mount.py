@@ -307,6 +307,10 @@ def copy_dst_files(folder_name):
             try:
                 shutil.copy2(src_file, dst_file)
             except OSError as e:
+                start_blink("red")
+                stop_scroll()
+                clear_display()
+                start_scroll("ไฟล์เสีย")
                 print(f"❌ Error copying '{src_file}' → '{dst_file}': {e}")
 
     print(f"📁 คัดลอกโฟลเดอร์ '{folder_name}' → usb.img สำเร็จ")
@@ -321,38 +325,44 @@ def create_usb_image():
     subprocess.run(["mkfs.vfat", USB_IMG_PATH], check=True)
     subprocess.run(["chmod", "+rw", USB_IMG_PATH], check=True)
     subprocess.run(["sync"])
-    time.sleep(1.0)
     print("✅ usb.img พร้อมใช้งาน\n")
 
-def save_all_back_from_usb():
+def save_back_from_usb(idx):
     try:
         subprocess.run(["sudo", "modprobe", "-r", "g_mass_storage"], check=True)
         time.sleep(0.5)
 
         mount_image()
-        print("📥 ดึงข้อมูลทั้งหมดกลับมายัง PATTERN_ROOT...")
+        print("📥 ดึงไฟล์กลับจาก usb.img...")
 
-        # ลบทุกไฟล์ใน PATTERN_ROOT
-        for f in os.listdir(PATTERN_ROOT):
-            f_path = os.path.join(PATTERN_ROOT, f)
+        # โฟลเดอร์เป้าหมาย เช่น 01, 02
+        target_dir = os.path.join(PATTERN_ROOT, idx.zfill(4))
+
+        # สร้างถ้ายังไม่มี
+        os.makedirs(target_dir, exist_ok=True)
+
+        # ลบไฟล์เดิมก่อน
+        for f in os.listdir(target_dir):
+            f_path = os.path.join(target_dir, f)
             if os.path.isfile(f_path) or os.path.islink(f_path):
                 os.remove(f_path)
             elif os.path.isdir(f_path):
                 shutil.rmtree(f_path)
 
-        # คัดลอกจาก USB_MOUNT_PATH → PATTERN_ROOT
+        # คัดลอกกลับ
         for item in os.listdir(USB_MOUNT_PATH):
             s = os.path.join(USB_MOUNT_PATH, item)
-            d = os.path.join(PATTERN_ROOT, item)
+            d = os.path.join(target_dir, item)
             if os.path.isdir(s):
                 shutil.copytree(s, d)
             else:
                 shutil.copy2(s, d)
 
         unmount_image()
-        print("✅ ดึงข้อมูลทั้งหมดกลับมายัง PATTERN_ROOT สำเร็จ")
+        print("✅ ดึงไฟล์กลับสำเร็จ")
     except Exception as e:
-        print(f"❌ ล้มเหลวในการดึงข้อมูลทั้งหมด: {e}")
+        print(f"❌ ดึงไฟล์กลับล้มเหลว: {e}")
+
 
 
 
@@ -373,13 +383,11 @@ def main():
     start_scroll("ใส่เลขช่อง")
     stop_scroll()
     idx = realtime_input()
-    check_0 = False
     try:
         if idx != "0":
             selected = folders[int(idx)-1]
         else:
-            selected = PATTERN_ROOT
-            check_0 = True
+            raise ValueError("error")
         stop_scroll()
         clear_display()
         draw_text(idx)
@@ -421,17 +429,17 @@ def main():
         start_scroll("ผิดพลาดกด → เพื่อเริ่มใหม่")
         time.sleep(2)
         print("❌ เกิดข้อผิดพลาดในการโหลด g_mass_storage:", e)
-    if check_0:
-        start_blink("yellow")
-        stop_scroll()
-        clear_display()
-        start_scroll("เสร็จแล้วกด Esc")
-        while True:
-            if realtime_input_check_special():
-                save_all_back_from_usb()
-                stop_scroll()
-                clear_display()
-                break
+    start_blink("yellow")
+    stop_scroll()
+    clear_display()
+    start_scroll("เสร็จแล้วกด Esc")
+    while True:
+        if realtime_input_check_special():
+            save_back_from_usb(idx)
+            stop_scroll()
+            clear_display()
+            start_scroll("เสร็จ")
+            break
     # reload systemd
     subprocess.run(["sudo", "systemctl", "daemon-reload"])
 
