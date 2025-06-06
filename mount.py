@@ -435,9 +435,9 @@ def main():
     start_scroll("เสร็จแล้วกด Esc")
     while True:
         if realtime_input_check_special():
-            save_back_from_usb(idx)
             stop_scroll()
             clear_display()
+            save_back_from_usb(idx)
             start_scroll("เสร็จ")
             break
     # reload systemd
